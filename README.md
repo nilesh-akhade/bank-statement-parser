@@ -14,6 +14,10 @@ Extracting text content from PDF is not simple because it always produces hard t
 
 My approach is to crop the PDF file pages to include only the table part. And then provide this PDF file to the library which is capable of extracting tables from PDF.
 
+## Usage
+
+    ./pdfstmt2csv.bash icici_cc.pdf icici mypassword
+
 ## Available Libraries and Tools
 
 - [pdfcpu](https://github.com/pdfcpu/pdfcpu) - A PDF processor written in Go
