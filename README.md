@@ -1,29 +1,57 @@
-# Bank Statement Parser
+# PDF Bank Statement Parser
 
-A CLI tool which allows to extract structured transactions data from Bank or Credit card statements in PDF format.
+A command-line tool for extracting structured transaction data from PDF bank and credit card statements.
 
-## Problem
+## The Challenge
 
-It might be necessary to classify, tag transactions done from credit cards for the purpose of personal finance management. Unfortunately indian bank and credit card lenders do not provide statements in machine readable formats. Hence we are left with parsing PDF files.
+Personal finance management often requires categorizing and analyzing credit card transactions. However, Indian banks and credit card providers typically only offer statements in PDF format, rather than machine-readable formats. This necessitates a solution for parsing PDF files to extract meaningful transaction data.
 
-## Design
+## Technical Approach
 
-Extracting text content from PDF is not simple because it always produces hard to understand text stream. Obviously because PDF is printing optimized format, it lacks structure and whitespace information.
+PDF parsing presents unique challenges since PDFs are optimized for printing rather than data extraction. A simple text extraction using tools like pdfcpu:
 
-    pdfcpu extract -mode=content hdfc_cc.pdf
+```bash
+pdfcpu extract -mode=content hdfc_cc.pdf
+```
 
-My approach is to crop the PDF file pages to include only the table part. And then provide this PDF file to the library which is capable of extracting tables from PDF.
+produces an unstructured text stream that's difficult to parse meaningfully.
 
-## Usage
+Our solution uses a two-step approach:
+1. Crop PDF pages to isolate the transaction table area
+2. Process the cropped PDF with specialized table extraction libraries
 
-    ./pdfstmt2csv.bash icici_cc.pdf icici mypassword
+## Implementation
 
-## Available Libraries and Tools
+Currently implemented as a bash script that combines:
+- pdfcpu for PDF cropping
+- camelot for table extraction
 
-- [pdfcpu](https://github.com/pdfcpu/pdfcpu) - A PDF processor written in Go
-- [PDF Reader](https://github.com/ledongthuc/pdf) - A simple Go library which enables reading PDF files
+A Python rewrite is in progress to enhance robustness and extensibility.
 
-- [Camelot](https://github.com/atlanhq/camelot): PDF Table Extraction for Humans
-- [Tabula](https://github.com/tabulapdf/tabula) is a tool for liberating data tables trapped inside PDF files
-- [pdfplumber](https://github.com/jsvine/pdfplumber) - Table extraction and visual debugging
-- [pdftables](https://github.com/drj11/pdftables) - A library for extracting tables from PDF files
+## Usage Example
+
+```bash
+./pdfstmt2csv.bash icici_cc.pdf icici mypassword
+```
+
+## Tool Evaluation
+
+### PDF Processing Libraries
+
+Go-based:
+- pdfcpu: Versatile PDF processor with broad functionality
+- PDF Reader: Lightweight library for PDF reading
+
+C++/C-based:
+- qpdf: Robust PDF transformer that handles corrupted files effectively
+
+Python-based:
+- Camelot: Specialized in table extraction
+- pdfplumber: Detailed PDF content analysis and extraction
+- PyMuPDF: Comprehensive PDF manipulation toolkit
+- PyPDF: Pure Python library for basic PDF operations
+
+### Key Findings
+
+- qpdf excels at handling corrupted files that other tools fail to process
+- pdfcpu offers a good balance of simplicity and versatility for general PDF processing tasks
