@@ -1,11 +1,44 @@
 import pikepdf
 import sys
+from dataclasses import dataclass
+from typing import Optional
 from pypdf import PdfReader
 import pandas as pd
 import re
 import argparse
 import tempfile
 import os
+
+@dataclass
+class BankPattern:
+    """Bank specific patterns and formats"""
+    name: str
+    pattern: str
+    date_format: str
+    date_out_format: str = '%d %b %y'  # Standard output format
+    credit_identifier: str = 'C'
+    debit_identifier: str = 'D'
+    amount_group: int = 3
+    date_group: int = 1
+    desc_group: int = 2
+    type_group: Optional[int] = 4  # None if type is determined by credit_suffix
+    credit_suffix: Optional[str] = None  # e.g., 'Cr' for HDFC
+
+# Predefined bank patterns
+BANK_PATTERNS = {
+    'sbi': BankPattern(
+        name='SBI',
+        pattern=r'(\d{2} \w{3} \d{2}) (.*?) (\d{1,3}(?:,\d{3})*\.?\d{0,2}) ([CD])',
+        date_format='%d %b %y'
+    ),
+    'hdfc': BankPattern(
+        name='HDFC',
+        pattern=r'(\d{2}/\d{2}/\d{4})\s+(.*?)\s+((?:\d{1,3}(?:,\d{3})*\.?\d{0,2})(?:\s*Cr)?)\s*$',
+        date_format='%d/%m/%Y',
+        credit_suffix='Cr',
+        type_group=None
+    )
+}
 
 def parse_cropbox(cropbox_str):
     """
@@ -36,6 +69,7 @@ Examples:
   %(prog)s --password=123456 input.pdf
   %(prog)s --cropbox "10,422,430,675" input.pdf
   %(prog)s --output transactions.csv input.pdf
+  %(prog)s --bank hdfc input.pdf
         '''
     )
     parser.add_argument('input_pdf', 
@@ -50,8 +84,43 @@ Examples:
     parser.add_argument('--output', '-o',
                        help='Output CSV file (default: transactions.csv)',
                        default='transactions.csv')
+    parser.add_argument('--bank',
+                       choices=['sbi', 'hdfc'],
+                       help='Force bank type (override auto-detection)')
     
     return parser.parse_args()
+
+def identify_bank(pdf_path, password=None):
+    """
+    Identify bank from PDF content
+    Args:
+        pdf_path (str): Path to PDF file
+        password (str): PDF password if encrypted
+    Returns:
+        str: Bank identifier ('hdfc', 'sbi', or None)
+    """
+    try:
+        reader = PdfReader(pdf_path, password=password)
+        text = reader.pages[0].extract_text()
+        
+        # Define bank identifiers
+        bank_identifiers = {
+            'hdfc': 'HDFC Bank Credit Cards GSTIN',
+            'sbi': 'GSTIN of SBI Card'
+        }
+        
+        # Check for each bank's identifier
+        for bank_id, identifier in bank_identifiers.items():
+            if identifier in text:
+                print(f"Detected {bank_id.upper()} Bank statement")
+                return bank_id
+        
+        print("Warning: Could not identify bank type from statement content")
+        return None
+        
+    except Exception as e:
+        print(f"Error identifying bank: {str(e)}")
+        return None
 
 def preprocess_pdf(input_path, output_path, password=None):
     """
@@ -71,7 +140,7 @@ def preprocess_pdf(input_path, output_path, password=None):
                     object_stream_mode=pikepdf.ObjectStreamMode.disable,
                     encryption=False)
         
-        print("Successfully preprocessed PDF: ", output_path)
+        print("Successfully preprocessed PDF")
         return True
         
     except Exception as e:
@@ -83,72 +152,120 @@ def preprocess_pdf(input_path, output_path, password=None):
         if 'new_pdf' in locals():
             new_pdf.close()
 
-def extract_transactions_from_region(input_path, crop_box):
+def extract_transactions_from_region(input_path, crop_box, bank_pattern='sbi'):
     """
     Extract transactions directly from specified region of PDF
     """
     try:
+        # Get bank pattern
+        if isinstance(bank_pattern, str):
+            pattern = BANK_PATTERNS.get(bank_pattern.lower())
+            if not pattern:
+                raise ValueError(f"Unknown bank pattern: {bank_pattern}")
+        elif isinstance(bank_pattern, BankPattern):
+            pattern = bank_pattern
+        else:
+            raise ValueError("bank_pattern must be string key or BankPattern object")
+
+        # Read and crop PDF
         reader = PdfReader(input_path)
         page = reader.pages[0]
-        
-        # Get page dimensions
         page_height = float(page.mediabox.height)
-        
-        # Apply crop box
         page.cropbox.lower_left = (crop_box[0], page_height - crop_box[3])
         page.cropbox.upper_right = (crop_box[2], page_height - crop_box[1])
         
-        # Extract text from cropped region
+        # Extract and process text
         text = page.extract_text()
-        
-        # Split into lines
         lines = text.split('\n')
-        
-        # Initialize lists to store transaction data
         transactions = []
         
-        # Regular expression to match transaction lines
-        # SBI Bank pattern
-        transaction_pattern = r'(\d{2} \w{3} \d{2}) (.*?) (\d{1,3}(?:,\d{3})*\.?\d{0,2}) ([CD])'
-        # HDFC Bank pattern
-        # transaction_pattern = r'(\d{2}/\d{2}/\d{4})\s+(.*?)\s+((?:\d{1,3}(?:,\d{3})*\.?\d{0,2})(?:\s*Cr)?)\s*$'
-        for line in lines:
-            # print(line)
-            match = re.search(transaction_pattern, line)
-            if match:
-                date, description, amount, txn_type = match.groups()
-                
-                # Clean up amount - remove commas
-                amount = float(amount.replace(',', ''))
-                
-                # Make amount negative for debits
-                if txn_type == 'D':
-                    amount = -amount
-                
-                transactions.append({
-                    'Date': date,
-                    'Description': description.strip(),
-                    'Amount': amount,
-                    'Type': txn_type
-                })
+        print(f"\nProcessing {len(lines)} lines...")
         
-        # Convert to DataFrame
+        for i, line in enumerate(lines):
+            try:
+                match = re.search(pattern.pattern, line)
+                if match:
+                    groups = match.groups()
+                    
+                    # Debug print
+                    print(f"\nMatched line {i+1}: {line}")
+                    print(f"Groups: {groups}")
+                    
+                    # Validate all required groups are present
+                    if any(g is None for g in groups):
+                        print(f"Warning: Missing data in line {i+1}: {groups}")
+                        continue
+                    
+                    # Extract date and convert format if needed
+                    date_str = groups[pattern.date_group - 1]
+                    date_obj = pd.to_datetime(date_str, format=pattern.date_format)
+                    std_date = date_obj.strftime(pattern.date_out_format)
+                    
+                    # Extract description
+                    description = groups[pattern.desc_group - 1].strip()
+                    
+                    # Extract and process amount
+                    amount_str = groups[pattern.amount_group - 1]
+                    if amount_str is None:
+                        print(f"Warning: No amount found in line {i+1}")
+                        continue
+                        
+                    # Clean amount string
+                    amount_str = amount_str.replace(',', '')
+                    if pattern.credit_suffix:
+                        amount_str = amount_str.replace(pattern.credit_suffix, '')
+                    amount_str = amount_str.strip()
+                    
+                    try:
+                        amount = float(amount_str)
+                    except ValueError:
+                        print(f"Warning: Invalid amount format in line {i+1}: {amount_str}")
+                        continue
+                    
+                    # Determine transaction type
+                    if pattern.type_group:
+                        # Type is explicitly specified (e.g., SBI's C/D)
+                        txn_type = groups[pattern.type_group - 1]
+                        is_credit = txn_type == pattern.credit_identifier
+                    else:
+                        # Type is determined by suffix (e.g., HDFC's Cr)
+                        is_credit = pattern.credit_suffix and pattern.credit_suffix in groups[pattern.amount_group - 1]
+                    
+                    # Make amount negative for debits
+                    if not is_credit:
+                        amount = -amount
+                    
+                    transactions.append({
+                        'Date': std_date,
+                        'Description': description,
+                        'Amount': amount,
+                        'Type': pattern.credit_identifier if is_credit else pattern.debit_identifier
+                    })
+                    print(f"Successfully processed transaction: {std_date} - {description} - {amount}")
+                    
+            except Exception as e:
+                print(f"Warning: Error processing line {i+1}: {str(e)}")
+                continue
+        
+        print(f"\nFound {len(transactions)} valid transactions")
+        
+        # Convert to DataFrame and sort
         df = pd.DataFrame(transactions)
-        
         if not df.empty:
-            # Sort by date
-            df['Date'] = pd.to_datetime(df['Date'], format='%d %b %y')
+            df['Date'] = pd.to_datetime(df['Date'], format=pattern.date_out_format)
             df = df.sort_values('Date')
         
         return df
     
     except Exception as e:
         print(f"Error extracting transactions: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return pd.DataFrame()
 
-def process_pdf(input_path, output_csv, password, crop_box):
+def process_pdf(input_path, output_csv, password, crop_box, bank=None):
     """
-    Complete PDF processing pipeline
+    Complete PDF processing pipeline with bank auto-detection
     """
     # Create temporary file
     with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp_file:
@@ -160,12 +277,19 @@ def process_pdf(input_path, output_csv, password, crop_box):
                 print("Preprocessing failed, stopping.")
                 return
             
-            # Step 2: Extract transactions
-            df = extract_transactions_from_region(tmp_path, crop_box)
+            # Step 2: Identify bank type if not specified
+            if not bank:
+                bank = identify_bank(tmp_path)
+                if not bank:
+                    print("Could not identify bank type. Please specify using --bank option.")
+                    return
+            
+            # Step 3: Extract transactions using identified pattern
+            df = extract_transactions_from_region(tmp_path, crop_box, bank)
             
             # Display and save results
             if not df.empty:
-                print("\nExtracted Transactions:")
+                print(f"\nExtracted {len(df)} transactions:")
                 print(df)
                 
                 df.to_csv(output_csv, index=False)
@@ -179,6 +303,7 @@ def process_pdf(input_path, output_csv, password, crop_box):
             # Clean up temporary file
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
+                print("Cleaned up temporary files")
 
 def main():
     # Parse command line arguments
@@ -189,7 +314,8 @@ def main():
         input_path=args.input_pdf,
         output_csv=args.output,
         password=args.password,
-        crop_box=args.cropbox
+        crop_box=args.cropbox,
+        bank=args.bank
     )
 
 if __name__ == "__main__":
