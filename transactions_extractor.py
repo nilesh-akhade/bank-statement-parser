@@ -165,6 +165,7 @@ def extract_transactions_from_region(input_path, profile):
         
         for i, line in enumerate(lines, 1):
             try:
+                # print(line)
                 match = re.search(pattern.regex, line)
                 if match:
                     groups = match.groups()
@@ -245,6 +246,7 @@ def process_pdf(input_path, output_csv, password):
             # Save results
             if not df.empty:
                 print(f"\nExtracted {len(df)} transactions")
+                print(df)
                 df.to_csv(output_csv, index=False)
                 print(f"Saved transactions to {output_csv}")
             else:
