@@ -27,15 +27,31 @@ def parse_arguments():
     """
     Parse command line arguments
     """
-    parser = argparse.ArgumentParser(description='PDF Cropbox Locator')
+    parser = argparse.ArgumentParser(
+        description='Bank Profile Builder - Help create bank profiles for transaction extraction',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Examples:
+  # Show full page content (helps find identifier):
+  %(prog)s --password=123456 --show-content input.pdf
+  
+  # Show content from specific area (helps build regex):
+  %(prog)s --password=123456 --cropbox "10,422,430,675" --show-content input.pdf
+  
+  # Visualize cropbox area:
+  %(prog)s --password=123456 --cropbox "10,422,430,675" input.pdf
+        '''
+    )
     parser.add_argument('input_pdf', help='Input PDF file')
     parser.add_argument('--password', 
                       help='PDF password',
                       default=None)
     parser.add_argument('--cropbox', 
                       type=parse_cropbox,
-                      help='Cropbox coordinates as "x0,top,x1,bottom"',
-                      default=(10, 422, 430, 675))
+                      help='Cropbox coordinates as "x0,top,x1,bottom"')
+    parser.add_argument('--show-content',
+                      action='store_true',
+                      help='Show text content from the specified area')
     
     return parser.parse_args()
 
@@ -73,6 +89,32 @@ def preprocess_pdf(input_path, output_path, password=None):
         if 'new_pdf' in locals():
             new_pdf.close()
 
+def extract_text_content(pdf_path, crop_box=None):
+    """
+    Extract text content from PDF
+    Args:
+        pdf_path (str): Path to PDF file
+        crop_box (tuple): Optional cropbox coordinates (x0, top, x1, bottom)
+    Returns:
+        str: Extracted text content
+    """
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            page = pdf.pages[0]
+            
+            if crop_box:
+                # Extract text from specified area
+                cropped = page.crop(crop_box)
+                text = cropped.extract_text()
+            else:
+                # Extract text from full page
+                text = page.extract_text()
+            
+            return text
+    except Exception as e:
+        print(f"Error extracting text: {str(e)}")
+        return None
+
 def visualize_cropbox(pdf_path, crop_box):
     """
     Visualize PDF page with crop box overlay
@@ -81,10 +123,7 @@ def visualize_cropbox(pdf_path, crop_box):
         crop_box (tuple): (x0, top, x1, bottom) coordinates
     """
     with pdfplumber.open(pdf_path) as pdf:
-        # Get first page
         page = pdf.pages[0]
-        
-        # Convert page to image
         img = page.to_image()
         
         # Create figure and axis with appropriate size
@@ -113,15 +152,13 @@ def visualize_cropbox(pdf_path, crop_box):
         # Remove axes
         plt.axis('off')
         
-        # Print dimensions for reference
-        print(f"Page dimensions: width={page.width}, height={page.height}")
+        print(f"\nPage dimensions: width={page.width}, height={page.height}")
         print(f"Crop box coordinates: {crop_box}")
         print("Red rectangle shows the area that will be extracted")
         
         plt.show()
 
 def main():
-    # Parse command line arguments
     args = parse_arguments()
     
     # Create temporary file
@@ -134,9 +171,27 @@ def main():
                 print("Preprocessing failed, stopping.")
                 return
             
-            # Step 2: Show page with crop box overlay
-            visualize_cropbox(tmp_path, args.cropbox)
-            
+            if args.show_content:
+                # Extract and show text content
+                print("\nExtracted Text Content:")
+                print("-" * 60)
+                text = extract_text_content(tmp_path, args.cropbox)
+                if text:
+                    print(text)
+                    print("-" * 60)
+                    
+                    # Show line-by-line with numbers for regex building
+                    print("\nLine by line (for regex building):")
+                    print("-" * 60)
+                    for i, line in enumerate(text.split('\n'), 1):
+                        if line.strip():
+                            print(f"Line {i:2d}: {line}")
+                    print("-" * 60)
+                
+            elif args.cropbox:
+                # Visualize cropbox
+                visualize_cropbox(tmp_path, args.cropbox)
+                
         finally:
             # Clean up temporary file
             if os.path.exists(tmp_path):

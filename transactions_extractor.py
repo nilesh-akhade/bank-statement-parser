@@ -1,15 +1,17 @@
-import pikepdf
+import argparse
+import json
+import re
 import sys
+import tempfile
+import os
+from pathlib import Path
+
+import pikepdf
 from dataclasses import dataclass
 from typing import Optional, List
 from pypdf import PdfReader
 import pandas as pd
-import re
-import argparse
-import tempfile
-import os
-import json
-from pathlib import Path
+import pdfplumber
 
 @dataclass
 class BankPattern:
@@ -148,76 +150,77 @@ def identify_bank(pdf_path, profiles, password=None):
 def extract_transactions_from_region(input_path, profile):
     """Extract transactions using bank profile"""
     try:
-        reader = PdfReader(input_path)
-        page = reader.pages[0]
-        page_height = float(page.mediabox.height)
-        
-        # Apply crop box from profile
-        crop_box = profile.crop_box
-        page.cropbox.lower_left = (crop_box[0], page_height - crop_box[3])
-        page.cropbox.upper_right = (crop_box[2], page_height - crop_box[1])
-        
-        # Extract and process text
-        text = page.extract_text()
-        lines = text.split('\n')
-        transactions = []
-        pattern = profile.pattern
-        
-        for i, line in enumerate(lines, 1):
-            try:
-                # print(line)
-                match = re.search(pattern.regex, line)
-                if match:
-                    groups = match.groups()
-                    
-                    if any(g is None for g in groups):
-                        continue
-                    
-                    # Process transaction data
-                    date_str = groups[pattern.date_group - 1]
-                    description = groups[pattern.desc_group - 1].strip()
-                    amount_str = groups[pattern.amount_group - 1]
-                    
-                    # Convert date
-                    date_obj = pd.to_datetime(date_str, format=pattern.date_format)
-                    std_date = date_obj.strftime(pattern.date_out_format)
-                    
-                    # Process amount
-                    amount_str = amount_str.replace(',', '')
-                    if pattern.credit_suffix:
-                        amount_str = amount_str.replace(pattern.credit_suffix, '')
-                    amount = float(amount_str.strip())
-                    
-                    # Determine transaction type
-                    if pattern.type_group:
-                        txn_type = groups[pattern.type_group - 1]
-                        is_credit = txn_type == pattern.credit_identifier
-                    else:
-                        is_credit = pattern.credit_suffix and pattern.credit_suffix in groups[pattern.amount_group - 1]
-                    
-                    if not is_credit:
-                        amount = -amount
-                    
-                    transactions.append({
-                        'Date': std_date,
-                        'Description': description,
-                        'Amount': amount,
-                        'Type': pattern.credit_identifier if is_credit else pattern.debit_identifier
-                    })
-                    
-            except Exception as e:
-                continue
-        
-        # Convert to DataFrame
-        df = pd.DataFrame(transactions)
-        if not df.empty:
-            df['Date'] = pd.to_datetime(df['Date'], format=pattern.date_out_format)
-            df = df.sort_values('Date')
-        
-        return df
+        # Use pdfplumber for proper text extraction from cropped area
+        with pdfplumber.open(input_path) as pdf:
+            page = pdf.pages[0]
+            
+            # Apply crop box from profile
+            cropped_page = page.crop(profile.crop_box)
+            
+            # Extract text from cropped area
+            text = cropped_page.extract_text()
+            lines = text.split('\n')
+            transactions = []
+            pattern = profile.pattern
+            
+            print(f"\nProcessing {len(lines)} lines from cropped area...")
+            for i, line in enumerate(lines, 1):
+                try:
+                    match = re.search(pattern.regex, line)
+                    if match:
+                        groups = match.groups()
+                        
+                        if any(g is None for g in groups):
+                            continue
+                        
+                        # Process transaction data
+                        date_str = groups[pattern.date_group - 1]
+                        description = groups[pattern.desc_group - 1].strip()
+                        amount_str = groups[pattern.amount_group - 1]
+                        
+                        # Convert date
+                        date_obj = pd.to_datetime(date_str, format=pattern.date_format)
+                        std_date = date_obj.strftime(pattern.date_out_format)
+                        
+                        # Process amount
+                        amount_str = amount_str.replace(',', '')
+                        if pattern.credit_suffix:
+                            amount_str = amount_str.replace(pattern.credit_suffix, '')
+                        amount = float(amount_str.strip())
+                        
+                        # Determine transaction type
+                        if pattern.type_group:
+                            txn_type = groups[pattern.type_group - 1]
+                            is_credit = txn_type == pattern.credit_identifier
+                        else:
+                            is_credit = pattern.credit_suffix and pattern.credit_suffix in groups[pattern.amount_group - 1]
+                        
+                        if not is_credit:
+                            amount = -amount
+                        
+                        transactions.append({
+                            'Date': std_date,
+                            'Description': description,
+                            'Amount': amount,
+                            'Type': pattern.credit_identifier if is_credit else pattern.debit_identifier
+                        })
+                        
+                except Exception as e:
+                    print(f"Warning: Error processing line {i}: {str(e)}")
+                    continue
+            
+            # Convert to DataFrame
+            df = pd.DataFrame(transactions)
+            if not df.empty:
+                df['Date'] = pd.to_datetime(df['Date'], format=pattern.date_out_format)
+                df = df.sort_values('Date')
+            
+            return df
     
     except Exception as e:
         print(f"Error extracting transactions: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return pd.DataFrame()
 
 def process_pdf(input_path, output_csv, password):

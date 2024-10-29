@@ -3,7 +3,7 @@ infile=$1
 bank=$2
 password=$3
 
-declare -A table_coordinates=( ["hdfc"]="[0 130 600 490]" ["icici"]="[200 220 600 480]" ["citi"]="[0 50 600 200]" ["hsbc"]="[0 50 600 200]" )
+declare -A table_coordinates=( ["hdfc"]="[0 130 600 490]" ["icici"]="[200 220 600 480]" ["citi"]="[0 50 600 200]" ["hsbc"]="[17 200 435 580]" )
 table_coordinate=${table_coordinates[$bank]}
 
 outfile="$(mktemp --suffix=.pdf)"

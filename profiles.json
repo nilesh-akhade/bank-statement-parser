@@ -2,7 +2,12 @@
     "sbi": {
         "name": "SBI",
         "identifier": "GSTIN of SBI Card",
-        "crop_box": [10, 422, 430, 675],
+        "crop_box": [
+            10,
+            422,
+            430,
+            675
+        ],
         "pattern": {
             "regex": "(\\d{2} \\w{3} \\d{2}) (.*?) (\\d{1,3}(?:,\\d{3})*\\.?\\d{0,2}) ([CD])",
             "date_format": "%d %b %y",
@@ -18,7 +23,12 @@
     "hdfc": {
         "name": "HDFC",
         "identifier": "HDFC Bank Credit Cards GSTIN",
-        "crop_box": [10, 200, 430, 600],
+        "crop_box": [
+            10,
+            200,
+            430,
+            600
+        ],
         "pattern": {
             "regex": "(\\d{2}/\\d{2}/\\d{4})\\s+((?:\\d+%|[A-Za-z]).*?)\\s+((?:\\d{1,3}(?:,\\d{3})*\\.?\\d{0,2})(?:\\s*Cr)?)\\s*$",
             "date_format": "%d/%m/%Y",
@@ -33,11 +43,58 @@
     },
     "icici": {
         "name": "ICICI",
-        "identifier": "CICI Bank Credit Card GST Number",
-        "crop_box": [200, 360, 560, 620],
+        "identifier": "ICICI Bank Credit Card GST Number",
+        "crop_box": [
+            200,
+            360,
+            560,
+            620
+        ],
         "pattern": {
             "regex": "(\\d{2}/\\d{2}/\\d{4})\\s+\\d+\\s+(.*?(?:IN|AM IN))\\s+(?:-?\\d+)\\s+((?:\\d{1,3}(?:,\\d{3})*\\.?\\d{0,2})(?:\\s*CR)?)",
             "date_format": "%d/%m/%Y",
+            "date_group": 1,
+            "desc_group": 2,
+            "amount_group": 3,
+            "type_group": null,
+            "credit_identifier": "C",
+            "debit_identifier": "D",
+            "credit_suffix": "CR"
+        }
+    },
+    "niyo-sbm": {
+        "name": "NiyoGlobal SBM",
+        "identifier": "Niyo Global Credit Card Statement",
+        "crop_box": [
+            85,
+            500,
+            510,
+            800
+        ],
+        "pattern": {
+            "regex": "(\\d{2}-[A-Za-z]{3}-\\d{4})\\s+(.*?)\\s+₹\\s+(\\d+(?:,\\d{3})*\\.\\d{2})",
+            "date_format": "%d-%b-%Y",
+            "date_group": 1,
+            "desc_group": 2,
+            "amount_group": 3,
+            "type_group": null,
+            "credit_identifier": "C",
+            "debit_identifier": "D",
+            "credit_suffix": null
+        }
+    },
+    "hsbc": {
+        "name": "HSBC",
+        "identifier": "The Hongkong and Shanghai Banking Corporation Limited",
+        "crop_box": [
+            15,
+            260,
+            435,
+            642
+        ],
+        "pattern": {
+            "regex": "(\\d{2}[A-Z]{3})\\s+(?!NET\\s+OUTSTANDING\\s+BALANCE)([^\\n]*?)\\s+(\\d+(?:,\\d{3})*\\.\\d{2})(?:\\s+CR)?",
+            "date_format": "%d%b",
             "date_group": 1,
             "desc_group": 2,
             "amount_group": 3,
